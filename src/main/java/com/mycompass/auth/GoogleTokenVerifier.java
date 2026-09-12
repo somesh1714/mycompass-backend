@@ -27,22 +27,26 @@ public class GoogleTokenVerifier {
     }
 
     public GoogleUserInfo verify(String idTokenString) {
+        GoogleIdToken idToken;
         try {
-            GoogleIdToken idToken = verifier.verify(idTokenString);
-            if (idToken == null) {
-                throw new IllegalArgumentException("Invalid Google token");
-            }
-
-            GoogleIdToken.Payload payload = idToken.getPayload();
-            String googleId = payload.getSubject();
-            String email = payload.getEmail();
-            String name = (String) payload.get("name");
-
-            return new GoogleUserInfo(googleId, email, name != null ? name : email);
-        } catch (IllegalArgumentException ex) {
-            throw ex;
+            // The underlying library can itself throw IllegalArgumentException (with no
+            // useful message) for a malformed token string, alongside its declared
+            // GeneralSecurityException/IOException — catch broadly here and always
+            // normalize to our own message, rather than ever leaking a null/raw one.
+            idToken = verifier.verify(idTokenString);
         } catch (Exception ex) {
             throw new IllegalArgumentException("Invalid Google token", ex);
         }
+
+        if (idToken == null) {
+            throw new IllegalArgumentException("Invalid Google token");
+        }
+
+        GoogleIdToken.Payload payload = idToken.getPayload();
+        String googleId = payload.getSubject();
+        String email = payload.getEmail();
+        String name = (String) payload.get("name");
+
+        return new GoogleUserInfo(googleId, email, name != null ? name : email);
     }
 }
