@@ -2,6 +2,7 @@ package com.mycompass.auth;
 
 import com.mycompass.auth.dto.AuthResponse;
 import com.mycompass.auth.dto.ForgotPasswordRequest;
+import com.mycompass.auth.dto.GoogleLoginRequest;
 import com.mycompass.auth.dto.LoginRequest;
 import com.mycompass.auth.dto.MessageResponse;
 import com.mycompass.auth.dto.RegisterRequest;
@@ -31,6 +32,11 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(authService.login(request));
+    }
+
+    @PostMapping("/google")
+    public ResponseEntity<AuthResponse> google(@Valid @RequestBody GoogleLoginRequest request) {
+        return ResponseEntity.ok(authService.loginWithGoogle(request));
     }
 
     @GetMapping("/verify-email")

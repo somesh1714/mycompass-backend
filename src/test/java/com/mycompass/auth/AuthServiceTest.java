@@ -2,6 +2,7 @@ package com.mycompass.auth;
 
 import com.mycompass.auth.dto.AuthResponse;
 import com.mycompass.auth.dto.ForgotPasswordRequest;
+import com.mycompass.auth.dto.GoogleLoginRequest;
 import com.mycompass.auth.dto.LoginRequest;
 import com.mycompass.auth.dto.RegisterRequest;
 import com.mycompass.auth.dto.ResetPasswordRequest;
@@ -52,6 +53,8 @@ class AuthServiceTest {
     private JwtService jwtService;
     @Mock
     private EmailService emailService;
+    @Mock
+    private GoogleTokenVerifier googleTokenVerifier;
 
     @InjectMocks
     private AuthService authService;
@@ -262,6 +265,82 @@ class AuthServiceTest {
         authService.forgotPassword(request);
 
         verifyNoInteractions(tokenRepository, emailService);
+    }
+
+    // ---------- loginWithGoogle ----------
+
+    @Test
+    void loginWithGoogle_createsNewUser_preVerifiedAndNoPassword() {
+        GoogleLoginRequest request = new GoogleLoginRequest("valid-google-id-token");
+        GoogleUserInfo googleUser = new GoogleUserInfo("google-sub-123", "newgoogle@example.com", "New Googler");
+
+        when(googleTokenVerifier.verify("valid-google-id-token")).thenReturn(googleUser);
+        when(userRepository.findByEmail(googleUser.email())).thenReturn(Optional.empty());
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
+            User u = invocation.getArgument(0);
+            u.setId(UUID.randomUUID());
+            return u;
+        });
+        when(jwtService.generateToken(any(UUID.class), eq(googleUser.email()))).thenReturn("jwt-token");
+
+        AuthResponse response = authService.loginWithGoogle(request);
+
+        assertThat(response.token()).isEqualTo("jwt-token");
+        assertThat(response.email()).isEqualTo(googleUser.email());
+        assertThat(response.emailVerified()).isTrue();
+
+        verify(userRepository).save(argThat(u ->
+                u.getProvider() == AuthProvider.GOOGLE
+                        && u.getGoogleId().equals("google-sub-123")
+                        && u.getPasswordHash() == null
+                        && u.isEmailVerified()));
+    }
+
+    @Test
+    void loginWithGoogle_linksExistingLocalAccountByEmail_withoutChangingProvider() {
+        GoogleLoginRequest request = new GoogleLoginRequest("valid-google-id-token");
+        GoogleUserInfo googleUser = new GoogleUserInfo("google-sub-456", existingUser.getEmail(), "Somesh");
+
+        when(googleTokenVerifier.verify("valid-google-id-token")).thenReturn(googleUser);
+        when(userRepository.findByEmail(existingUser.getEmail())).thenReturn(Optional.of(existingUser));
+        when(jwtService.generateToken(existingUser.getId(), existingUser.getEmail())).thenReturn("jwt-token");
+
+        AuthResponse response = authService.loginWithGoogle(request);
+
+        assertThat(response.token()).isEqualTo("jwt-token");
+        assertThat(existingUser.getGoogleId()).isEqualTo("google-sub-456");
+        assertThat(existingUser.getProvider()).isEqualTo(AuthProvider.LOCAL); // unchanged — hybrid account
+        assertThat(existingUser.getPasswordHash()).isNotNull(); // password login still works too
+
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void loginWithGoogle_doesNotOverwriteAnAlreadyLinkedGoogleId() {
+        existingUser.setGoogleId("original-google-id");
+        GoogleLoginRequest request = new GoogleLoginRequest("valid-google-id-token");
+        GoogleUserInfo googleUser = new GoogleUserInfo("a-different-sub", existingUser.getEmail(), "Somesh");
+
+        when(googleTokenVerifier.verify("valid-google-id-token")).thenReturn(googleUser);
+        when(userRepository.findByEmail(existingUser.getEmail())).thenReturn(Optional.of(existingUser));
+        when(jwtService.generateToken(existingUser.getId(), existingUser.getEmail())).thenReturn("jwt-token");
+
+        authService.loginWithGoogle(request);
+
+        assertThat(existingUser.getGoogleId()).isEqualTo("original-google-id");
+    }
+
+    @Test
+    void loginWithGoogle_rejectsInvalidToken() {
+        GoogleLoginRequest request = new GoogleLoginRequest("garbage-token");
+        when(googleTokenVerifier.verify("garbage-token"))
+                .thenThrow(new IllegalArgumentException("Invalid Google token"));
+
+        assertThatThrownBy(() -> authService.loginWithGoogle(request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid Google token");
+
+        verifyNoInteractions(userRepository, jwtService);
     }
 
     // ---------- resetPassword ----------

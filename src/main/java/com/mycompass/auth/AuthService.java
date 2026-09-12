@@ -2,6 +2,7 @@ package com.mycompass.auth;
 
 import com.mycompass.auth.dto.AuthResponse;
 import com.mycompass.auth.dto.ForgotPasswordRequest;
+import com.mycompass.auth.dto.GoogleLoginRequest;
 import com.mycompass.auth.dto.LoginRequest;
 import com.mycompass.auth.dto.RegisterRequest;
 import com.mycompass.auth.dto.ResetPasswordRequest;
@@ -31,6 +32,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final EmailService emailService;
+    private final GoogleTokenVerifier googleTokenVerifier;
 
     @Transactional
     public AuthResponse register(RegisterRequest request) {
@@ -99,6 +101,38 @@ public class AuthService {
 
         verificationToken.getUser().setPasswordHash(passwordEncoder.encode(request.newPassword()));
         verificationToken.setUsedAt(Instant.now());
+    }
+
+    @Transactional
+    public AuthResponse loginWithGoogle(GoogleLoginRequest request) {
+        GoogleUserInfo googleUser = googleTokenVerifier.verify(request.idToken());
+
+        User user = userRepository.findByEmail(googleUser.email())
+                .map(existing -> linkGoogleIdIfNeeded(existing, googleUser.googleId()))
+                .orElseGet(() -> createGoogleUser(googleUser));
+
+        String token = jwtService.generateToken(user.getId(), user.getEmail());
+        return toAuthResponse(user, token);
+    }
+
+    private User linkGoogleIdIfNeeded(User user, String googleId) {
+        // An existing LOCAL account keeps its password AND gains Google as an
+        // alternate sign-in method — provider is left as-is, only googleId is filled in.
+        if (user.getGoogleId() == null) {
+            user.setGoogleId(googleId);
+        }
+        return user;
+    }
+
+    private User createGoogleUser(GoogleUserInfo googleUser) {
+        User user = User.builder()
+                .email(googleUser.email())
+                .name(googleUser.name())
+                .provider(AuthProvider.GOOGLE)
+                .googleId(googleUser.googleId())
+                .emailVerified(true) // Google has already verified this email address
+                .build();
+        return userRepository.save(user);
     }
 
     private void issueEmailVerificationToken(User user) {
