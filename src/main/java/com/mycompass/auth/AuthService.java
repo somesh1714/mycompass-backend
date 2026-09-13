@@ -33,6 +33,7 @@ public class AuthService {
     private final JwtService jwtService;
     private final EmailService emailService;
     private final GoogleTokenVerifier googleTokenVerifier;
+    private final GoogleAuthCodeClient googleAuthCodeClient;
 
     @Transactional
     public AuthResponse register(RegisterRequest request) {
@@ -105,7 +106,8 @@ public class AuthService {
 
     @Transactional
     public AuthResponse loginWithGoogle(GoogleLoginRequest request) {
-        GoogleUserInfo googleUser = googleTokenVerifier.verify(request.idToken());
+        String idToken = googleAuthCodeClient.exchangeCodeForIdToken(request.code());
+        GoogleUserInfo googleUser = googleTokenVerifier.verify(idToken);
 
         User user = userRepository.findByEmail(googleUser.email())
                 .map(existing -> linkGoogleIdIfNeeded(existing, googleUser.googleId()))

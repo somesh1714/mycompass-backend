@@ -55,6 +55,8 @@ class AuthServiceTest {
     private EmailService emailService;
     @Mock
     private GoogleTokenVerifier googleTokenVerifier;
+    @Mock
+    private GoogleAuthCodeClient googleAuthCodeClient;
 
     @InjectMocks
     private AuthService authService;
@@ -271,9 +273,10 @@ class AuthServiceTest {
 
     @Test
     void loginWithGoogle_createsNewUser_preVerifiedAndNoPassword() {
-        GoogleLoginRequest request = new GoogleLoginRequest("valid-google-id-token");
+        GoogleLoginRequest request = new GoogleLoginRequest("valid-auth-code");
         GoogleUserInfo googleUser = new GoogleUserInfo("google-sub-123", "newgoogle@example.com", "New Googler");
 
+        when(googleAuthCodeClient.exchangeCodeForIdToken("valid-auth-code")).thenReturn("valid-google-id-token");
         when(googleTokenVerifier.verify("valid-google-id-token")).thenReturn(googleUser);
         when(userRepository.findByEmail(googleUser.email())).thenReturn(Optional.empty());
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
@@ -298,9 +301,10 @@ class AuthServiceTest {
 
     @Test
     void loginWithGoogle_linksExistingLocalAccountByEmail_withoutChangingProvider() {
-        GoogleLoginRequest request = new GoogleLoginRequest("valid-google-id-token");
+        GoogleLoginRequest request = new GoogleLoginRequest("valid-auth-code");
         GoogleUserInfo googleUser = new GoogleUserInfo("google-sub-456", existingUser.getEmail(), "Somesh");
 
+        when(googleAuthCodeClient.exchangeCodeForIdToken("valid-auth-code")).thenReturn("valid-google-id-token");
         when(googleTokenVerifier.verify("valid-google-id-token")).thenReturn(googleUser);
         when(userRepository.findByEmail(existingUser.getEmail())).thenReturn(Optional.of(existingUser));
         when(jwtService.generateToken(existingUser.getId(), existingUser.getEmail())).thenReturn("jwt-token");
@@ -318,9 +322,10 @@ class AuthServiceTest {
     @Test
     void loginWithGoogle_doesNotOverwriteAnAlreadyLinkedGoogleId() {
         existingUser.setGoogleId("original-google-id");
-        GoogleLoginRequest request = new GoogleLoginRequest("valid-google-id-token");
+        GoogleLoginRequest request = new GoogleLoginRequest("valid-auth-code");
         GoogleUserInfo googleUser = new GoogleUserInfo("a-different-sub", existingUser.getEmail(), "Somesh");
 
+        when(googleAuthCodeClient.exchangeCodeForIdToken("valid-auth-code")).thenReturn("valid-google-id-token");
         when(googleTokenVerifier.verify("valid-google-id-token")).thenReturn(googleUser);
         when(userRepository.findByEmail(existingUser.getEmail())).thenReturn(Optional.of(existingUser));
         when(jwtService.generateToken(existingUser.getId(), existingUser.getEmail())).thenReturn("jwt-token");
@@ -331,16 +336,16 @@ class AuthServiceTest {
     }
 
     @Test
-    void loginWithGoogle_rejectsInvalidToken() {
-        GoogleLoginRequest request = new GoogleLoginRequest("garbage-token");
-        when(googleTokenVerifier.verify("garbage-token"))
-                .thenThrow(new IllegalArgumentException("Invalid Google token"));
+    void loginWithGoogle_rejectsInvalidCode() {
+        GoogleLoginRequest request = new GoogleLoginRequest("garbage-code");
+        when(googleAuthCodeClient.exchangeCodeForIdToken("garbage-code"))
+                .thenThrow(new IllegalArgumentException("Invalid Google authorization code"));
 
         assertThatThrownBy(() -> authService.loginWithGoogle(request))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Invalid Google token");
+                .hasMessageContaining("Invalid Google authorization code");
 
-        verifyNoInteractions(userRepository, jwtService);
+        verifyNoInteractions(googleTokenVerifier, userRepository, jwtService);
     }
 
     // ---------- resetPassword ----------
